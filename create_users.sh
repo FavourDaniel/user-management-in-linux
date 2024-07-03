@@ -86,7 +86,7 @@ while IFS=';' read -r username groups; do
         # Store the username and password securely
         echo "$username,$password" >> $PASSWORD_FILE
         chmod 600 "$PASSWORD_FILE"
-        log_message "Password for $username stored in $PASSWORD_FILE."
+        log_message "Password for $username stored in $PASSWORD_FILE"
     fi
 done < "$1"
 
