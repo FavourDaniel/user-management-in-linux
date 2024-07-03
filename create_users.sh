@@ -16,6 +16,11 @@ INPUT_FILE=$1
 LOG_FILE="/var/log/user_management.log"
 PASSWORD_FILE="/var/secure/user_passwords.txt"
 
+# Function to log messages
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a $LOG_FILE
+}
+
 # Ensure /var/secure directory exists
 if [[ ! -d "/var/secure" ]]; then
     mkdir -p /var/secure
@@ -34,48 +39,55 @@ while IFS=';' read -r username groups; do
     username=$(echo "$username" | tr -d '[:space:]')
     groups=$(echo "$groups" | tr -d '[:space:]')
 
+    # Debug: Log the username and groups read from the file
+    log_message "Read line: username='$username', groups='$groups'"
+
     # Check if username or groups are empty
     if [[ -z "$username" || -z "$groups" ]]; then
-        echo "Error: Username or groups missing in line: $line" >> "$LOG_FILE"
+        log_message "Error: Username or groups missing in line: $username"
         continue
     fi
 
     # Check if the user already exists
     if id "$username" &>/dev/null; then
-        echo "User $username already exists, skipping." >> "$LOG_FILE"
+        log_message "User $username already exists, skipping."
     else
-        # Create the user
-        useradd -m -s /bin/bash "$username" >> "$LOG_FILE" 2>&1
-        echo "User $username created." >> "$LOG_FILE"
-
         # Create the user's personal group
-        groupadd "$username" >> "$LOG_FILE" 2>&1
-        echo "Group $username created." >> "$LOG_FILE"
-    fi
-
-    # Add the user to additional groups
-    IFS=',' read -ra group_array <<< "$groups"
-    for group in "${group_array[@]}"; do
-        if ! getent group "$group" &>/dev/null; then
-            groupadd "$group" >> "$LOG_FILE" 2>&1
-            echo "Group $group created." >> "$LOG_FILE"
+        if ! getent group "$username" >/dev/null; then
+            groupadd "$username"
+            log_message "Created group: $username"
         fi
-        # Add user to group
-        usermod -aG "$group" "$username" >> "$LOG_FILE" 2>&1
-        echo "User $username added to group $group." >> "$LOG_FILE"
-    done
 
-    # Set home directory permissions
-    mkdir -p "/home/$username"
-    chown -R "$username:$username" "/home/$username"
-    chmod 755 "/home/$username"
+        # Create the user with the personal group
+        useradd -m -g "$username" "$username"
+        log_message "Created user: $username"
 
-    # Generate and store the password securely
-    password=$(generate_password)
-    echo "$username:$password" >> "$PASSWORD_FILE"
-    chmod 600 "$PASSWORD_FILE"
-    echo "Password for $username stored in $PASSWORD_FILE." >> "$LOG_FILE"
+        # Generate a random password and set it for the user
+        password=$(generate_password)
+        echo "$username:$password" | chpasswd
+        log_message "Set password for user: $username"
 
-done < "$INPUT_FILE"
+        # Add the user to additional groups
+        IFS=',' read -ra group_array <<< "$groups"
+        for group in "${group_array[@]}"; do
+            if ! getent group "$group" &>/dev/null; then
+                groupadd "$group"
+                log_message "Created group: $group"
+            fi
+            usermod -aG "$group" "$username"
+            log_message "Added user $username to group: $group"
+        done
 
-echo "User creation script completed."
+        # Set home directory permissions
+        mkdir -p "/home/$username"
+        chown -R "$username:$username" "/home/$username"
+        chmod 755 "/home/$username"
+
+        # Store the username and password securely
+        echo "$username,$password" >> $PASSWORD_FILE
+        chmod 600 "$PASSWORD_FILE"
+        log_message "Password for $username stored in $PASSWORD_FILE."
+    fi
+done < "$1"
+
+log_message "User creation process completed."
